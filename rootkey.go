@@ -10,6 +10,7 @@ import (
 )
 
 var (
+	// Some vars which can be overridden for testing.
 	clock      dbrootkeystore.Clock
 	newBacking = func(s *RootKeys) dbrootkeystore.Backing {
 		return backing{s}
@@ -31,6 +32,8 @@ type RootKeys struct {
 	initDBErr  error
 }
 
+// NewRootKeys creates a RootKeys object that uses the provided bucket within
+// the specified db for persisting keys.
 func NewRootKeys(db *bolt.DB, bucket []byte, maxCacheSize int) *RootKeys {
 	return &RootKeys{
 		keys:   dbrootkeystore.NewRootKeys(maxCacheSize, clock),
@@ -39,13 +42,13 @@ func NewRootKeys(db *bolt.DB, bucket []byte, maxCacheSize int) *RootKeys {
 	}
 }
 
+// NewStore creates a new RootKeyStore given a store policy.
 func (s *RootKeys) NewStore(policy Policy) bakery.RootKeyStore {
 	b := newBacking(s)
 	return s.keys.NewStore(b, dbrootkeystore.Policy(policy))
 }
 
-// backing implements dbrootkeystore.Backing by using Postgres as
-// a backing store.
+// backing implements dbrootkeystore.Backing by using bolt as a backing store.
 type backing struct {
 	keys *RootKeys
 }

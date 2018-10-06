@@ -14,8 +14,8 @@ import (
 )
 
 var (
-	keyBucket = []byte("keys")
-	seqBucket = []byte("sequence")
+	keyBucket = []byte("keys")     // bucket that stores keyID/key pairs
+	seqBucket = []byte("sequence") // bucket that stores index/keyID pairs
 )
 
 // initDB makes sure that the database was initialized. Subsequent calls to
