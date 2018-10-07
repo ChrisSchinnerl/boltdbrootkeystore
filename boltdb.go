@@ -58,7 +58,11 @@ func (s *RootKeys) getKey(id []byte) (key dbrootkeystore.RootKey, err error) {
 		if keyBytes == nil {
 			return bakery.ErrNotFound
 		}
-		// TODO Decrypt key.
+		// Decrypt key.
+		keyBytes, err = s.decrypt(keyBytes)
+		if err != nil {
+			return err
+		}
 		// Decode key.
 		decoder := gob.NewDecoder(bytes.NewReader(keyBytes))
 		if err := decoder.Decode(&key); err != nil {
@@ -89,21 +93,18 @@ func (s *RootKeys) findLatestKey(createdAfter, expiresAfter, expiresBefore time.
 		// Loop over all the keys starting from the most recent one until
 		// either a key is found that satisfies the conditions, or we encounter
 		// a key that violates the 'Created' condition.
-		seq := seqBucket.Sequence()
-		seqBytes := make([]byte, 8)
-		for i := seq; i != ^uint64(0); i-- {
-			// Get the id of the key.
-			binary.LittleEndian.PutUint64(seqBytes, i)
-			keyID := seqBucket.Get(seqBytes)
-			if keyID == nil {
-				continue
-			}
+		c := seqBucket.Cursor()
+		for seqBytes, keyID := c.Last(); seqBytes != nil; seqBytes, keyID = c.Prev() {
 			// Get the key.
 			keyBytes := keyBucket.Get(keyID)
 			if keyBytes == nil {
 				return errors.New("Key should never be in seqBucket but not in the keyBucket")
 			}
-			// TODO decrypt the key.
+			// Decrypt key.
+			keyBytes, err = s.decrypt(keyBytes)
+			if err != nil {
+				return err
+			}
 			// Decode the key.
 			decoder := gob.NewDecoder(bytes.NewReader(keyBytes))
 			if err = decoder.Decode(&key); err != nil {
@@ -141,21 +142,20 @@ func (s *RootKeys) insertKey(key dbrootkeystore.RootKey) error {
 
 		// When we insert a new key we check all old keys for expired ones
 		// first and delete them.
-		seq := seqBucket.Sequence()
-		seqBytes := make([]byte, 8)
-		for i := seq; i != ^uint64(0); i-- {
-			// Get the id of the key.
-			binary.LittleEndian.PutUint64(seqBytes, i)
-			keyID := seqBucket.Get(seqBytes)
-			if keyID == nil {
-				continue
-			}
+		// TODO Pruning the database at every insert is not very fast. This
+		// could be done periodically instead.
+		c := seqBucket.Cursor()
+		for seqBytes, keyID := c.First(); seqBytes != nil; seqBytes, keyID = c.Next() {
 			// Get the key.
 			keyBytes := keyBucket.Get(keyID)
 			if keyBytes == nil {
 				return errors.New("Key should never be in seqBucket but not in the keyBucket")
 			}
-			// TODO decrypt the key.
+			// Decrypt key.
+			keyBytes, err := s.decrypt(keyBytes)
+			if err != nil {
+				return err
+			}
 			// Decode the key.
 			var oldKey dbrootkeystore.RootKey
 			decoder := gob.NewDecoder(bytes.NewReader(keyBytes))
@@ -180,9 +180,13 @@ func (s *RootKeys) insertKey(key dbrootkeystore.RootKey) error {
 		if err := enc.Encode(key); err != nil {
 			return err
 		}
-		// TODO Encrypt Key.
+		// Encrypt key.
+		keyBytes, err := s.encrypt(buf.Bytes())
+		if err != nil {
+			return err
+		}
 		// Store the key in the key bucket.
-		if err := keyBucket.Put(key.Id, buf.Bytes()); err != nil {
+		if err := keyBucket.Put(key.Id, keyBytes); err != nil {
 			return err
 		}
 		// Store the id of the key in the sequence bucket.
@@ -190,7 +194,7 @@ func (s *RootKeys) insertKey(key dbrootkeystore.RootKey) error {
 		if err != nil {
 			return err
 		}
-		seqBytes = make([]byte, 8)
+		seqBytes := make([]byte, 8)
 		binary.LittleEndian.PutUint64(seqBytes, seq)
 		if err := seqBucket.Put(seqBytes, key.Id); err != nil {
 			return err

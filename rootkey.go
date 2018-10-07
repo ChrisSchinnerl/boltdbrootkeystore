@@ -15,6 +15,10 @@ var (
 	newBacking = func(s *RootKeys) dbrootkeystore.Backing {
 		return backing{s}
 	}
+
+	// noEncryption is a passthrough function that takes some byte as an input
+	// and returns the same slice.
+	noEncryption = func(in []byte) ([]byte, error) { return in, nil }
 )
 
 // Policy holds a store policy for root keys.
@@ -27,6 +31,10 @@ type RootKeys struct {
 	db     *bolt.DB
 	bucket []byte
 
+	// Encryption related fields.
+	encrypt func([]byte) ([]byte, error)
+	decrypt func([]byte) ([]byte, error)
+
 	// initDBOnce guards initDBErr.
 	initDBOnce sync.Once
 	initDBErr  error
@@ -36,9 +44,11 @@ type RootKeys struct {
 // the specified db for persisting keys.
 func NewRootKeys(db *bolt.DB, bucket []byte, maxCacheSize int) *RootKeys {
 	return &RootKeys{
-		keys:   dbrootkeystore.NewRootKeys(maxCacheSize, clock),
-		db:     db,
-		bucket: bucket,
+		keys:    dbrootkeystore.NewRootKeys(maxCacheSize, clock),
+		db:      db,
+		bucket:  bucket,
+		encrypt: noEncryption,
+		decrypt: noEncryption,
 	}
 }
 
@@ -46,6 +56,15 @@ func NewRootKeys(db *bolt.DB, bucket []byte, maxCacheSize int) *RootKeys {
 func (s *RootKeys) NewStore(policy Policy) bakery.RootKeyStore {
 	b := newBacking(s)
 	return s.keys.NewStore(b, dbrootkeystore.Policy(policy))
+}
+
+// WithEncryption replaces the encrypt and decrypt fields of the RootKeys. Keys
+// will be encrypted using encrypt before being stored in the database and
+// decrypted using decrypt after being retrieved.
+func (s *RootKeys) WithEncryption(encrypt, decrypt func([]byte) ([]byte, error)) *RootKeys {
+	s.encrypt = encrypt
+	s.decrypt = decrypt
+	return s
 }
 
 // backing implements dbrootkeystore.Backing by using bolt as a backing store.
